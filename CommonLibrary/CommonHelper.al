@@ -1,4 +1,4 @@
-codeunit 50000 "LKN Common Helper"
+codeunit 5445558 "LKN Common Helper"
 {
     Access = Public;
 

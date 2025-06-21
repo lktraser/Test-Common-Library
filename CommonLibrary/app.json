@@ -11,26 +11,14 @@
   "url": "https://www.lkn.test",
   "logo": "logo.png",
   "dependencies": [
-    {
-      "id": "63ca2fa4-4f03-4f2b-a480-172fef340d3f",
-      "name": "System Application",
-      "publisher": "Microsoft",
-      "version": "24.0.0.0"
-    },
-    {
-      "id": "437dbf0e-84ff-417a-965d-ed2bb9650972",
-      "name": "Base Application",
-      "publisher": "Microsoft",
-      "version": "24.0.0.0"
-    }
   ],
   "screenshots": [],
   "platform": "24.0.0.0",
   "application": "24.0.0.0",
   "idRanges": [
     {
-      "from": 50000,
-      "to": 59999
+      "from": 5445557,
+      "to": 5445799
     }
   ],
   "resourceExposurePolicy": {
@@ -38,7 +26,7 @@
     "allowDownloadingSource": false,
     "includeSourceInSymbolFile": false
   },
-  "runtime": "12.0",
+  "runtime": "13.0",
   "features": [
     "NoImplicitWith"
   ]

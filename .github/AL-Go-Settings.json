@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/lktraser/AL-Go-Actions/main/settings.schema.json",
   "type": "AppSource App",
   "templateUrl": "https://github.com/lktraser/AL-Go-AppSource@main",
-  "gitHubRunner": "ubuntu-latest",
+  "gitHubRunner": "self-hosted",
   "gitHubRunnerShell": "pwsh",
   "CICDPushBranches": ["main", "release/*", "feature/*", "staging"],
   "environments": ["Staging", "Production"],

@@ -1,4 +1,4 @@
-codeunit 50001 "LKN Common Constants"
+codeunit 5445557 "LKN Common Constants"
 {
     Access = Public;
 
