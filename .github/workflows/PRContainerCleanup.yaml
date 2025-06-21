@@ -1,0 +1,153 @@
+name: 'PR Container Cleanup'
+
+on:
+  pull_request:
+    types: [closed]
+
+defaults:
+  run:
+    shell: powershell
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+  issues: write
+  pull-requests: write
+
+env:
+  ALGoOrgSettings: ${{ vars.ALGoOrgSettings }}
+  ALGoRepoSettings: ${{ vars.ALGoRepoSettings }}
+
+jobs:
+  Initialization:
+    runs-on: [ windows-latest ]
+    outputs:
+      prContainersEnabled: ${{ steps.checkEnabled.outputs.prContainersEnabled }}
+      githubRunner: ${{ steps.ReadSettings.outputs.GitHubRunnerJson }}
+      githubRunnerShell: ${{ steps.ReadSettings.outputs.GitHubRunnerShell }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Initialize the workflow
+        id: init
+        uses: lktraser/AL-Go-Actions/WorkflowInitialize@main
+        with:
+          shell: powershell
+
+      - name: Read settings
+        id: ReadSettings
+        uses: lktraser/AL-Go-Actions/ReadSettings@main
+        with:
+          shell: powershell
+          get: prContainers
+
+      - name: Check PR Containers Enabled
+        id: checkEnabled
+        run: |
+          $settings = '${{ steps.ReadSettings.outputs.SettingsJson }}' | ConvertFrom-Json
+          $enabled = $false
+          if ($settings.prContainers -and $settings.prContainers.enabled) {
+            $enabled = $settings.prContainers.enabled
+          }
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "prContainersEnabled=$enabled"
+
+  RemovePRContainer:
+    needs: [ Initialization ]
+    runs-on: ${{ fromJson(needs.Initialization.outputs.githubRunner) }}
+    if: needs.Initialization.outputs.prContainersEnabled == 'true'
+    defaults:
+      run:
+        shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Read secrets
+        id: ReadSecrets
+        uses: lktraser/AL-Go-Actions/ReadSecrets@main
+        with:
+          shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+          gitHubSecrets: ${{ toJson(secrets) }}
+          getSecrets: 'containerUsername,containerPassword'
+
+      - name: Check Container Status
+        id: checkStatus
+        uses: ./Actions/PRContainer
+        with:
+          shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+          operation: 'status'
+          prId: '${{ github.event.number }}'
+          postComment: 'false'
+        env:
+          containerusername: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).containerUsername }}
+          containerpassword: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).containerPassword }}
+
+      - name: Remove PR Container
+        if: steps.checkStatus.outputs.containerStatus != 'NotFound'
+        id: removeContainer
+        uses: ./Actions/PRContainer
+        with:
+          shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+          operation: 'remove'
+          prId: '${{ github.event.number }}'
+          forceCleanup: 'true'
+          postComment: 'false'
+        env:
+          containerusername: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).containerUsername }}
+          containerpassword: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).containerPassword }}
+
+      - name: Post Cleanup Comment
+        if: steps.checkStatus.outputs.containerStatus != 'NotFound'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const prId = '${{ github.event.number }}';
+            const containerName = '${{ steps.checkStatus.outputs.containerName }}';
+            const removeOutcome = '${{ steps.removeContainer.outcome }}';
+            
+            let emoji = '🧹';
+            let message = '';
+            
+            if (removeOutcome === 'success') {
+              message = `PR Container \`${containerName}\` has been successfully removed.`;
+            } else {
+              emoji = '⚠️';
+              message = `There was an issue removing PR Container \`${containerName}\`. Please check manually.`;
+            }
+            
+            const comment = `${emoji} **PR Container Cleanup**
+            
+            This pull request has been ${{ github.event.action }}.
+            
+            ${message}
+            
+            Thank you for using AL-Go PR Containers! 🚀`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Report Results
+        if: always()
+        run: |
+          Write-Host "PR Container cleanup completed"
+          Write-Host "PR ID: ${{ github.event.number }}"
+          Write-Host "Container Status: ${{ steps.checkStatus.outputs.containerStatus }}"
+          
+          if ('${{ steps.checkStatus.outputs.containerStatus }}' -ne 'NotFound') {
+            Write-Host "Container Name: ${{ steps.checkStatus.outputs.containerName }}"
+            Write-Host "Remove Outcome: ${{ steps.removeContainer.outcome }}"
+            
+            if ('${{ steps.removeContainer.outcome }}' -eq 'success') {
+              Write-Host "✅ Container removed successfully"
+            } else {
+              Write-Host "::warning::Container removal may have failed"
+            }
+          } else {
+            Write-Host "ℹ️ No container found for this PR"
+          }

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://raw.githubusercontent.com/lktraser/AL-Go-Actions/main/settings.schema.json",
+  "type": "AppSource App",
+  "templateUrl": "https://github.com/lktraser/AL-Go-AppSource@main",
+  "gitHubRunner": "ubuntu-latest",
+  "gitHubRunnerShell": "pwsh",
+  "CICDPushBranches": ["main", "release/*", "feature/*", "staging"],
+  "environments": ["Staging", "Production"],
+  "DeployToStaging": {
+    "branches": ["staging"],
+    "environmentName": "Staging",
+    "ContinuousDeployment": true
+  },
+  "DeployToProduction": {
+    "branches": ["main"],
+    "environmentName": "Production",
+    "ContinuousDeployment": false
+  },
+  "ConditionalSettings": [
+    {
+      "branches": [ "staging" ],
+      "settings": {
+        "appDependencyProbingPaths": [
+          {
+            "repo": "*",
+            "version": "latest",
+            "release_status": "latestBuild",
+            "branch": "staging",
+            "projects": "*",
+            "authTokenSecret": "ghTokenWorkflow"
+          }
+        ],
+        "versioningStrategy": 0,
+        "artifact": "////latest",
+        "cacheImageName": ""
+      }
+    },
+    {
+      "branches": [ "main", "release/*" ],
+      "settings": {
+        "appDependencyProbingPaths": [
+          {
+            "repo": "*",
+            "version": "latest",
+            "release_status": "release",
+            "projects": "*",
+            "authTokenSecret": "ghTokenWorkflow"
+          }
+        ]
+      }
+    }
+  ]
+}

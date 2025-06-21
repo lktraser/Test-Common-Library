@@ -1,0 +1,110 @@
+name: 'PR Container Nightly Backup'
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2 AM daily
+  workflow_dispatch:
+    inputs:
+      bcVersion:
+        description: 'Business Central version to use'
+        required: false
+        type: string
+      forceRecreate:
+        description: 'Force recreation even if recent backup exists'
+        required: false
+        type: boolean
+        default: false
+
+defaults:
+  run:
+    shell: powershell
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+env:
+  ALGoOrgSettings: ${{ vars.ALGoOrgSettings }}
+  ALGoRepoSettings: ${{ vars.ALGoRepoSettings }}
+
+jobs:
+  Initialization:
+    runs-on: [ self-hosted ]
+    outputs:
+      backupEnabled: ${{ steps.checkEnabled.outputs.backupEnabled }}
+      githubRunner: ${{ steps.ReadSettings.outputs.GitHubRunnerJson }}
+      githubRunnerShell: ${{ steps.ReadSettings.outputs.GitHubRunnerShell }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Initialize the workflow
+        id: init
+        uses: lktraser/AL-Go-Actions/WorkflowInitialize@main
+        with:
+          shell: powershell
+
+      - name: Read settings
+        id: ReadSettings
+        uses: lktraser/AL-Go-Actions/ReadSettings@main
+        with:
+          shell: powershell
+          get: prContainers
+
+      - name: Check Backup Creation Enabled
+        id: checkEnabled
+        run: |
+          $settings = '${{ steps.ReadSettings.outputs.SettingsJson }}' | ConvertFrom-Json
+          $enabled = $false
+          if ($settings.prContainers -and $settings.prContainers.enabled -and $settings.prContainers.backup -and $settings.prContainers.backup.enabled) {
+            $enabled = $settings.prContainers.backup.enabled
+          }
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "backupEnabled=$enabled"
+
+  CreateNightlyBackup:
+    needs: [ Initialization ]
+    runs-on: ${{ fromJson(needs.Initialization.outputs.githubRunner) }}
+    if: needs.Initialization.outputs.backupEnabled == 'true'
+    defaults:
+      run:
+        shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Read secrets
+        id: ReadSecrets
+        uses: lktraser/AL-Go-Actions/ReadSecrets@main
+        with:
+          shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+          gitHubSecrets: ${{ toJson(secrets) }}
+          getSecrets: 'containerUsername,containerPassword,spUsername,spPassword,TRASERInternalFeedsToken,licenseFileUrl'
+
+      - name: Create Nightly Backup
+        id: backup
+        uses: ./Actions/NightlyBackup
+        with:
+          shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+          bcVersion: ${{ github.event.inputs.bcVersion }}
+          forceRecreate: ${{ github.event.inputs.forceRecreate }}
+        env:
+          containerusername: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).containerUsername }}
+          containerpassword: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).containerPassword }}
+          spusername: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).spUsername }}
+          sppassword: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).spPassword }}
+          TRASERInternalFeedsToken: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).TRASERInternalFeedsToken }}
+          licenseFileUrl: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).licenseFileUrl }}
+
+      - name: Report Results
+        if: always()
+        run: |
+          Write-Host "Nightly backup workflow completed"
+          Write-Host "Backup Path: ${{ steps.backup.outputs.backupPath }}"
+          Write-Host "Message: ${{ steps.backup.outputs.message }}"
+          
+          if ('${{ steps.backup.outcome }}' -eq 'failure') {
+            Write-Host "::error::Nightly backup failed: ${{ steps.backup.outputs.message }}"
+          } else {
+            Write-Host "✅ Nightly backup completed successfully"
+          }

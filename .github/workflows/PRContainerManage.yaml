@@ -1,0 +1,256 @@
+name: 'PR Container Management'
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Operation to perform'
+        required: true
+        type: choice
+        options:
+          - create
+          - update
+          - start
+          - stop
+          - remove
+          - status
+      prId:
+        description: 'Pull Request ID'
+        required: true
+        type: string
+      containerName:
+        description: 'Override container name (optional)'
+        required: false
+        type: string
+      forceCleanup:
+        description: 'Force cleanup for remove operation'
+        required: false
+        type: boolean
+        default: false
+  issue_comment:
+    types: [created]
+
+defaults:
+  run:
+    shell: powershell
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+  issues: write
+  pull-requests: write
+
+env:
+  ALGoOrgSettings: ${{ vars.ALGoOrgSettings }}
+  ALGoRepoSettings: ${{ vars.ALGoRepoSettings }}
+
+jobs:
+  ParseCommand:
+    runs-on: [ windows-latest ]
+    if: github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '/container')
+    outputs:
+      operation: ${{ steps.parse.outputs.operation }}
+      prId: ${{ steps.parse.outputs.prId }}
+      validCommand: ${{ steps.parse.outputs.validCommand }}
+    steps:
+      - name: Parse Container Command
+        id: parse
+        run: |
+          $comment = '${{ github.event.comment.body }}'
+          $prId = '${{ github.event.issue.number }}'
+          $operation = ""
+          $validCommand = "false"
+          
+          if ($comment -match '/container\s+(start|stop|restart|remove|status)') {
+            $operation = $matches[1]
+            if ($operation -eq "restart") { $operation = "update" }
+            $validCommand = "true"
+          }
+          
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "operation=$operation"
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "prId=$prId"
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "validCommand=$validCommand"
+
+  Initialization:
+    needs: [ ParseCommand ]
+    runs-on: [ windows-latest ]
+    if: always() && (github.event_name == 'workflow_dispatch' || needs.ParseCommand.outputs.validCommand == 'true')
+    outputs:
+      prContainersEnabled: ${{ steps.checkEnabled.outputs.prContainersEnabled }}
+      githubRunner: ${{ steps.ReadSettings.outputs.GitHubRunnerJson }}
+      githubRunnerShell: ${{ steps.ReadSettings.outputs.GitHubRunnerShell }}
+      operation: ${{ steps.setInputs.outputs.operation }}
+      prId: ${{ steps.setInputs.outputs.prId }}
+      containerName: ${{ steps.setInputs.outputs.containerName }}
+      forceCleanup: ${{ steps.setInputs.outputs.forceCleanup }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Initialize the workflow
+        id: init
+        uses: lktraser/AL-Go-Actions/WorkflowInitialize@main
+        with:
+          shell: powershell
+
+      - name: Read settings
+        id: ReadSettings
+        uses: lktraser/AL-Go-Actions/ReadSettings@main
+        with:
+          shell: powershell
+          get: prContainers
+
+      - name: Check PR Containers Enabled
+        id: checkEnabled
+        run: |
+          $settings = '${{ steps.ReadSettings.outputs.SettingsJson }}' | ConvertFrom-Json
+          $enabled = $false
+          if ($settings.prContainers -and $settings.prContainers.enabled) {
+            $enabled = $settings.prContainers.enabled
+          }
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "prContainersEnabled=$enabled"
+
+      - name: Set Inputs
+        id: setInputs
+        run: |
+          if ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            $operation = '${{ github.event.inputs.operation }}'
+            $prId = '${{ github.event.inputs.prId }}'
+            $containerName = '${{ github.event.inputs.containerName }}'
+            $forceCleanup = '${{ github.event.inputs.forceCleanup }}'
+          } else {
+            $operation = '${{ needs.ParseCommand.outputs.operation }}'
+            $prId = '${{ needs.ParseCommand.outputs.prId }}'
+            $containerName = ''
+            $forceCleanup = 'false'
+          }
+          
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "operation=$operation"
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "prId=$prId"
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "containerName=$containerName"
+          Add-Content -Encoding UTF8 -Path $env:GITHUB_OUTPUT -Value "forceCleanup=$forceCleanup"
+
+  ManageContainer:
+    needs: [ Initialization ]
+    runs-on: ${{ fromJson(needs.Initialization.outputs.githubRunner) }}
+    if: needs.Initialization.outputs.prContainersEnabled == 'true'
+    defaults:
+      run:
+        shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Read secrets
+        id: ReadSecrets
+        uses: lktraser/AL-Go-Actions/ReadSecrets@main
+        with:
+          shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+          gitHubSecrets: ${{ toJson(secrets) }}
+          getSecrets: 'containerUsername,containerPassword,spUsername,spPassword,TRASERInternalFeedsToken'
+
+      - name: Manage PR Container
+        id: manage
+        uses: ./Actions/PRContainer
+        with:
+          shell: ${{ needs.Initialization.outputs.githubRunnerShell }}
+          operation: ${{ needs.Initialization.outputs.operation }}
+          prId: ${{ needs.Initialization.outputs.prId }}
+          containerName: ${{ needs.Initialization.outputs.containerName }}
+          forceCleanup: ${{ needs.Initialization.outputs.forceCleanup }}
+          postComment: ${{ github.event_name == 'issue_comment' && 'true' || 'false' }}
+        env:
+          containerusername: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).containerUsername }}
+          containerpassword: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).containerPassword }}
+          spusername: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).spUsername }}
+          sppassword: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).spPassword }}
+          TRASERInternalFeedsToken: ${{ fromJson(steps.ReadSecrets.outputs.Secrets).TRASERInternalFeedsToken }}
+
+      - name: Post Result Comment
+        if: github.event_name == 'issue_comment' && always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const operation = '${{ needs.Initialization.outputs.operation }}';
+            const prId = '${{ needs.Initialization.outputs.prId }}';
+            const containerName = '${{ steps.manage.outputs.containerName }}';
+            const containerUrl = '${{ steps.manage.outputs.containerUrl }}';
+            const containerStatus = '${{ steps.manage.outputs.containerStatus }}';
+            const message = '${{ steps.manage.outputs.message }}';
+            const outcome = '${{ steps.manage.outcome }}';
+            
+            let emoji = '✅';
+            let resultMessage = message;
+            
+            if (outcome === 'failure') {
+              emoji = '❌';
+              resultMessage = `Failed to ${operation} container: ${message}`;
+            } else {
+              switch(operation) {
+                case 'create':
+                case 'update':
+                  emoji = '🚀';
+                  if (containerUrl) {
+                    resultMessage = `Container is ready! 🔗 [Access your test environment](${containerUrl})`;
+                  }
+                  break;
+                case 'start':
+                  emoji = '▶️';
+                  if (containerUrl) {
+                    resultMessage = `Container started! 🔗 [Access your test environment](${containerUrl})`;
+                  }
+                  break;
+                case 'stop':
+                  emoji = '⏹️';
+                  resultMessage = 'Container stopped successfully';
+                  break;
+                case 'remove':
+                  emoji = '🗑️';
+                  resultMessage = 'Container removed successfully';
+                  break;
+                case 'status':
+                  emoji = 'ℹ️';
+                  resultMessage = `Container status: ${containerStatus}`;
+                  if (containerUrl) {
+                    resultMessage += ` 🔗 [Access](${containerUrl})`;
+                  }
+                  break;
+              }
+            }
+            
+            const comment = `${emoji} **Container ${operation}** for PR #${prId}
+            
+            **Container:** \`${containerName}\`
+            **Status:** ${containerStatus}
+            
+            ${resultMessage}
+            
+            ---
+            *Available commands: \`/container start\`, \`/container stop\`, \`/container restart\`, \`/container remove\`, \`/container status\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Report Results
+        if: always()
+        run: |
+          Write-Host "PR Container management completed"
+          Write-Host "Operation: ${{ needs.Initialization.outputs.operation }}"
+          Write-Host "PR ID: ${{ needs.Initialization.outputs.prId }}"
+          Write-Host "Container: ${{ steps.manage.outputs.containerName }}"
+          Write-Host "Status: ${{ steps.manage.outputs.containerStatus }}"
+          Write-Host "Message: ${{ steps.manage.outputs.message }}"
+          
+          if ('${{ steps.manage.outcome }}' -eq 'failure') {
+            Write-Host "::error::Container management failed: ${{ steps.manage.outputs.message }}"
+          } else {
+            Write-Host "✅ Container management completed successfully"
+            if ('${{ steps.manage.outputs.containerUrl }}' -ne '') {
+              Write-Host "🔗 Container URL: ${{ steps.manage.outputs.containerUrl }}"
+            }
+          }
