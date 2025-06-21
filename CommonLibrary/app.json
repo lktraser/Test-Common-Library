@@ -1,0 +1,45 @@
+{
+  "id": "12345678-1234-1234-1234-123456789012",
+  "name": "LKN Common Library",
+  "publisher": "LKN Test",
+  "version": "1.0.0.0",
+  "brief": "Common utilities and base functionality",
+  "description": "Shared library containing common utilities, base objects, and helper functions for AL applications",
+  "privacyStatement": "https://privacy.lkn.test",
+  "EULA": "https://eula.lkn.test",
+  "help": "https://help.lkn.test",
+  "url": "https://www.lkn.test",
+  "logo": "logo.png",
+  "dependencies": [
+    {
+      "id": "63ca2fa4-4f03-4f2b-a480-172fef340d3f",
+      "name": "System Application",
+      "publisher": "Microsoft",
+      "version": "24.0.0.0"
+    },
+    {
+      "id": "437dbf0e-84ff-417a-965d-ed2bb9650972",
+      "name": "Base Application",
+      "publisher": "Microsoft",
+      "version": "24.0.0.0"
+    }
+  ],
+  "screenshots": [],
+  "platform": "24.0.0.0",
+  "application": "24.0.0.0",
+  "idRanges": [
+    {
+      "from": 50000,
+      "to": 59999
+    }
+  ],
+  "resourceExposurePolicy": {
+    "allowDebugging": true,
+    "allowDownloadingSource": false,
+    "includeSourceInSymbolFile": false
+  },
+  "runtime": "12.0",
+  "features": [
+    "NoImplicitWith"
+  ]
+}
